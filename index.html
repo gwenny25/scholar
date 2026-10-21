@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scholarship Monitoring</title>
+<style>
+:root{--bg:#f6f7f5;--ink:#1d2b2a;--mute:#5d6b69;--line:#d5dbd8;--acc:#0f5c4d;--bad:#a3262a;--ok:#1b7a43;--warn:#8a5a00}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 Georgia,'Times New Roman',serif;background:var(--bg);color:var(--ink)}
+header{display:flex;justify-content:space-between;align-items:center;padding:12px 20px;border-bottom:1px solid var(--line);background:#fff}
+h1{font-size:18px;margin:0}h2{font-size:16px;margin:0 0 8px}main{max-width:1100px;margin:0 auto;padding:16px}
+section{background:#fff;border:1px solid var(--line);border-radius:6px;padding:14px;margin-bottom:16px}
+input,select,button{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:#fff}
+button{background:var(--acc);color:#fff;border-color:var(--acc);cursor:pointer}button.alt{background:#fff;color:var(--acc)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:end}label{display:flex;flex-direction:column;font-size:13px;color:var(--mute)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.stats div{border:1px solid var(--line);border-radius:6px;padding:8px}
+.stats b{font-size:22px;display:block}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.wrap{overflow-x:auto}.Compliant,.Verified,.Approved{color:var(--ok)}.With,.Returned,.Held{color:var(--bad)}.Pending{color:var(--warn)}
+#msg{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);padding:8px 14px;border-radius:4px;color:#fff;display:none;max-width:90%}
+pre{white-space:pre-wrap;margin:0;font:13px/1.4 Georgia,serif}.hide{display:none}
+</style></head><body>
+<header><h1>Scholarship Monitoring</h1><div id="who"></div></header>
+<main>
+<section id="login"><h2>Sign in</h2><div class="row">
+<label>Email<input id="em" type="email" autocomplete="username"></label>
+<label>Password<input id="pw" type="password" autocomplete="current-password"></label>
+<button id="go">Sign in</button></div></section>
+<div id="scholar" class="hide">
+ <section><h2 id="formTitle">Submit semester grades</h2><div class="row">
+  <label>Academic year<input id="ay" value="2026-2027" size="10"></label>
+  <label>Semester<select id="sm"><option>1</option><option>2</option><option>3</option></select></label>
+  <label>GWA (1.00 to 5.00)<input id="gwa" type="number" step="0.01" min="1" max="5"></label>
+  <label>Enrolled units<input id="un" type="number" min="0" step="1"></label>
+  <label>Failed<input id="fa" type="number" min="0" step="1" value="0"></label>
+  <label>Incomplete<input id="ic" type="number" min="0" step="1" value="0"></label>
+  <label>Dropped<input id="dr" type="number" min="0" step="1" value="0"></label>
+  <label>Grade-document reference<input id="ev" placeholder="e.g. GRADES-2026-S1.pdf"></label>
+  <button id="sub">Submit grades</button></div></section>
+ <section><h2>My submissions</h2><div class="wrap" id="mine"></div></section>
+</div>
+<div id="staff" class="hide">
+ <section><h2>Dashboard</h2><div class="row"><label>Academic year<input id="dy" value="2026-2027" size="10"></label>
+  <label>Semester<select id="ds"><option>1</option><option>2</option><option>3</option></select></label></div>
+  <div class="stats" id="stats" style="margin-top:10px"></div></section>
+ <section><h2>Register scholar</h2><div class="row">
+  <label>Student ID<input id="rs"></label><label>Full name<input id="rn"></label>
+  <label>Program<select id="rp"></select></label><button id="reg">Register and assign</button></div></section>
+ <section><h2>Submissions</h2><div class="row" style="margin-bottom:8px">
+  <label>Search ID or name<input id="q"></label>
+  <label>Program<select id="fp"><option value="">All</option></select></label>
+  <label>Compliance<select id="fc"><option value="">All</option><option>Not evaluated</option><option>Compliant</option><option>With Deficiency</option></select></label></div>
+  <div class="wrap" id="list"></div></section>
+ <section id="detail" class="hide"><h2 id="dt"></h2><pre id="dp"></pre></section>
+</div></main><div id="msg" role="status"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+    // Set these two values (anon key only; never a service-role key).
+    const SUPABASE_URL = 'https://bdkxhswxevdlhrrfpidz.supabase.co', SUPABASE_ANON_KEY = 'sb_publishable_z_-4xMYMdryeT1qo71WGqg_pGCIODo0';
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = id => document.getElementById(id);
+let me = null, rows = [], programs = [], assigned = 0;
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const cls = s => esc(String(s).split(' ')[0]);
+const fmt = t => new Date(t).toLocaleString('en-PH', {timeZone: 'Asia/Manila'});
+function toast(t, ok) { const m = $('msg'); m.textContent = t; m.style.background = ok ? 'var(--ok)' : 'var(--bad)'; m.style.display = 'block'; setTimeout(() => m.style.display = 'none', 4500); }
+async function rpc(fn, args, done) { const {error} = await db.rpc(fn, args); if (error) return toast(error.message, false); toast(done, true); await load(); }
+
+$('go').onclick = async () => {
+  const {error} = await db.auth.signInWithPassword({email: $('em').value, password: $('pw').value});
+  if (error) return toast(error.message, false); start();
+};
+async function start() {
+  const {data: {user}} = await db.auth.getUser(); if (!user) return;
+  const {data} = await db.from('profiles').select('*').eq('auth_id', user.id).maybeSingle();
+  if (!data) return toast('This account is not linked to a profile. See README step 4.', false);
+  me = data; $('login').classList.add('hide');
+  $('who').innerHTML = `${esc(me.full_name)} (${me.role}) <button class="alt" id="out">Sign out</button>`;
+  $('out').onclick = async () => { await db.auth.signOut(); location.reload(); };
+  $(me.role).classList.remove('hide');
+  if (me.role === 'staff') { const {data: p} = await db.from('programs').select('*').order('id'); programs = p;
+    $('rp').innerHTML = $('fp').innerHTML.slice(0, 0) + p.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('');
+    $('fp').innerHTML = '<option value="">All</option>' + p.map(x => `<option>${esc(x.name)}</option>`).join(''); }
+  load();
+}
+async function load() {
+  const {data, error} = await db.from('submissions').select('*, profiles(student_id,full_name,assignments(programs(name)))').order('id');
+  if (error) return toast(error.message, false); rows = data;
+  if (me.role === 'staff') { const {count} = await db.from('assignments').select('*', {count: 'exact', head: true}); assigned = count; }
+  render();
+}
+const prog = r => r.profiles?.assignments?.[0]?.programs?.name ?? r.profiles?.assignments?.programs?.name ?? '';
+function render() { me.role === 'staff' ? renderStaff() : renderScholar(); }
+
+function renderScholar() {
+  $('mine').innerHTML = rows.length ? `<table><tr><th>Year</th><th>Sem</th><th>GWA</th><th>Units</th><th>F/INC/DRP</th><th>Evidence</th><th>Submitted</th><th>Status</th><th>Compliance</th><th>Renewal</th><th></th></tr>` +
+   rows.map(r => `<tr><td>${esc(r.academic_year)}</td><td>${r.semester}</td><td>${r.gwa}</td><td>${r.units}</td><td>${r.failed}/${r.incomplete}/${r.dropped}</td><td>${esc(r.evidence_ref)}</td><td>${fmt(r.submitted_at)}</td>
+   <td class="${cls(r.verification_status)}">${esc(r.verification_status)}${r.return_reason ? '<br>Reason: ' + esc(r.return_reason) : ''}</td>
+   <td class="${cls(r.compliance_result)}">${esc(r.compliance_result)}${r.deficiencies.map(d => '<br>' + esc(d)).join('')}</td><td>${esc(r.renewal_decision)}</td>
+   <td>${r.verification_status === 'Returned' ? `<button class="alt" onclick="fix(${r.id})">Correct</button>` : ''}</td></tr>`).join('') + '</table>'
+   : 'No submissions yet. Use the form above to submit your first semester.';
+}
+window.fix = id => { const r = rows.find(x => x.id === id); $('ay').value = r.academic_year; $('sm').value = r.semester; $('gwa').value = r.gwa; $('un').value = r.units;
+  $('fa').value = r.failed; $('ic').value = r.incomplete; $('dr').value = r.dropped; $('ev').value = r.evidence_ref; $('formTitle').textContent = 'Correct and resubmit'; scrollTo(0, 0); };
+$('sub').onclick = () => rpc('submit_grades', {p_year: $('ay').value.trim(), p_sem: +$('sm').value, p_gwa: $('gwa').value === '' ? null : +$('gwa').value,
+  p_units: +$('un').value, p_failed: +$('fa').value, p_inc: +$('ic').value, p_drop: +$('dr').value, p_evidence: $('ev').value}, 'Submission received. Status: Pending verification.');
+
+function renderStaff() {
+  const y = $('dy').value, s = +$('ds').value, sem = rows.filter(r => r.academic_year === y && r.semester === s), n = k => sem.filter(r => r.compliance_result === k).length;
+  $('stats').innerHTML = [['Assigned scholars', assigned], ['Pending verification', sem.filter(r => r.verification_status === 'Pending verification').length], ['Compliant', n('Compliant')], ['With deficiency', n('With Deficiency')]]
+    .map(([a, b]) => `<div><b>${b}</b>${a}</div>`).join('');
+  const q = $('q').value.toLowerCase(), fp = $('fp').value, fc = $('fc').value;
+  const f = rows.filter(r => (!q || (r.profiles.student_id + ' ' + r.profiles.full_name).toLowerCase().includes(q)) && (!fp || prog(r) === fp) && (!fc || r.compliance_result === fc));
+  $('list').innerHTML = f.length ? `<table><tr><th>ID</th><th>Name</th><th>Program</th><th>Term</th><th>GWA</th><th>Units</th><th>F/INC/DRP</th><th>Submitted</th><th>Verification</th><th>Compliance</th><th>Renewal</th><th>Actions</th></tr>` +
+   f.map(r => `<tr><td>${esc(r.profiles.student_id)}</td><td>${esc(r.profiles.full_name)}</td><td>${esc(prog(r))}</td><td>${esc(r.academic_year)} S${r.semester}</td><td>${r.gwa}</td><td>${r.units}</td><td>${r.failed}/${r.incomplete}/${r.dropped}</td><td>${fmt(r.submitted_at)}</td>
+   <td class="${cls(r.verification_status)}">${esc(r.verification_status)}</td><td class="${cls(r.compliance_result)}">${esc(r.compliance_result)}</td><td class="${cls(r.renewal_decision)}">${esc(r.renewal_decision)}</td>
+   <td><button class="alt" onclick="ver(${r.id},'Verified')">Verify</button> <button class="alt" onclick="ver(${r.id},'Returned')">Return</button> <button class="alt" onclick="ev(${r.id})">Evaluate</button>
+   <button class="alt" onclick="dec(${r.id},'Approved')">Approve</button> <button class="alt" onclick="dec(${r.id},'Held')">Hold</button> <button class="alt" onclick="hist(${r.id})">Details</button></td></tr>`).join('') + '</table>'
+   : 'No submissions match these filters.';
+}
+['dy', 'ds', 'q', 'fp', 'fc'].forEach(i => $(i).addEventListener('input', () => me?.role === 'staff' && renderStaff()));
+window.ver = (id, st) => { const reason = st === 'Returned' ? prompt('Reason for returning the evidence:') : null; if (st === 'Returned' && reason === null) return; rpc('verify_submission', {p_id: id, p_status: st, p_reason: reason}, 'Marked ' + st); };
+window.ev = id => rpc('evaluate_submission', {p_id: id}, 'Evaluation recorded');
+window.dec = (id, d) => { const note = prompt('Decision note:'); if (note === null) return; rpc('decide_renewal', {p_id: id, p_decision: d, p_note: note}, 'Renewal ' + d); };
+window.hist = async id => { const r = rows.find(x => x.id === id); const {data} = await db.from('history').select('*').eq('submission_id', id).order('id');
+  $('detail').classList.remove('hide'); $('dt').textContent = `${r.profiles.student_id} ${r.profiles.full_name}: checks and history`;
+  $('dp').textContent = (r.deficiencies.length ? 'Deficiencies:\n- ' + r.deficiencies.join('\n- ') + '\n\n' : r.compliance_result === 'Compliant' ? 'All checks passed.\n\n' : 'Not evaluated.\n\n') +
+   'History:\n' + (data.length ? data.map(h => `${fmt(h.created_at)}  ${h.action}${h.detail ? ' (' + h.detail + ')' : ''}${h.note ? ' note: ' + h.note : ''}`).join('\n') : 'None'); };
+$('reg').onclick = async () => { await rpc('register_scholar', {p_student: $('rs').value, p_name: $('rn').value, p_program: +$('rp').value}, 'Scholar registered and assigned'); };
+start();
+</script></body></html>
